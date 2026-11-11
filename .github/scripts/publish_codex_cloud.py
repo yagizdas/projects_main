@@ -110,6 +110,7 @@ def publish(repo, pr_api, sha, task_path, task_id, number, author):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("repository", help="GitHub repository in owner/name form")
+    parser.add_argument("--pull-request", type=int, help="Check only this pull request")
     args = parser.parse_args()
     if not re.fullmatch(r"[A-Za-z0-9-]+/[A-Za-z0-9_.-]+", args.repository):
         parser.error("Expected a GitHub repository in owner/name form.")
@@ -122,6 +123,8 @@ def main():
     author = (user["login"], f"{owner_id}+{user['login']}@users.noreply.github.com")
     tasks = None
     for pr in github_pages(f"{repo_api}/pulls?state=open&per_page=100"):
+        if args.pull_request is not None and pr["number"] != args.pull_request:
+            continue
         title = pr["title"]
         prefix = TITLE_PREFIX.match(title)
         if not prefix or pr["user"]["id"] != owner_id:
