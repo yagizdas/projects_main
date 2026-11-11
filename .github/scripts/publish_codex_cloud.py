@@ -42,7 +42,7 @@ def pending_reply(comments, nonce, sha):
 
 
 def cloud_tasks():
-    options = ["codex", "cloud", "list", "--json", "--limit", "50"]
+    options = ["codex", "cloud", "list", "--json", "--limit", "20"]
     cursor = None
     seen = set()
     while True:
@@ -74,7 +74,7 @@ def resolve_task(tasks, title, repo, request, reply):
     return None
 
 
-def publish(repo, pr_api, sha, task_path, task_id, number, author):
+def publish(repo, pr_api, title, sha, task_path, task_id, number, author):
     original = Path.cwd()
     with tempfile.TemporaryDirectory(prefix="codex-cloud-publish-") as directory:
         scratch = Path(directory)
@@ -83,7 +83,10 @@ def publish(repo, pr_api, sha, task_path, task_id, number, author):
             git("init", "--quiet", "--bare")
             owner = repo["owner"]["id"]
             default = repo["default_branch"]
-            ref = target_ref(api(pr_api), repo["id"], owner, default, sha)
+            pr = api(pr_api)
+            if pr["title"] != title:
+                raise RuntimeError("The PR title changed. Request a fresh Cloud task.")
+            ref = target_ref(pr, repo["id"], owner, default, sha)
             origin = repo["clone_url"]
             git(*GITHUB_CREDENTIALS, "fetch", "--quiet", "--no-tags", "--depth=1",
                 origin, f"refs/pull/{number}/head")
@@ -95,7 +98,8 @@ def publish(repo, pr_api, sha, task_path, task_id, number, author):
             if not patch.startswith(b"diff --git "):
                 raise RuntimeError("Codex did not return a Git patch.")
             commit = build_commit(sha, task_path, patch, scratch / "patch-index", number, author=author)
-            if target_ref(api(pr_api), repo["id"], owner, default, sha) != ref:
+            pr = api(pr_api)
+            if pr["title"] != title or target_ref(pr, repo["id"], owner, default, sha) != ref:
                 raise RuntimeError("The target branch changed.")
             # The lease requires the exact approved parent, even if the branch was rewound.
             git(
@@ -142,7 +146,7 @@ def main():
                 tasks = list(cloud_tasks())
             task_id = resolve_task(tasks, title, args.repository, request, reply)
             if task_id:
-                publish(repo, f"{repo_api}/pulls/{number}", sha, task_path, task_id, number, author)
+                publish(repo, f"{repo_api}/pulls/{number}", title, sha, task_path, task_id, number, author)
         except (RuntimeError, SystemExit, subprocess.SubprocessError) as error:
             print(f"PR #{number}: {error}", flush=True)
 
