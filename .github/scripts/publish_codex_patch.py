@@ -57,7 +57,7 @@ def read_reply(body):
     return request_id, sha, blocks[0].encode()
 
 
-def find_task(comments, owner_id, response, request_id, sha):
+def find_request(comments, owner_id, response, request_id, sha):
     marker = re.compile(
         rf"^CODEX_PATCH_REQUEST {request_id} {sha} ({TASK})$", re.MULTILINE
     )
@@ -72,7 +72,7 @@ def find_task(comments, owner_id, response, request_id, sha):
             continue
         body = comment["body"].replace("\r\n", "\n")
         if body.startswith("@codex "):
-            matches.extend(marker.findall(body))
+            matches.extend((comment, task) for task in marker.findall(body))
     require(len(matches) == 1, "No unique matching request from the repository owner.")
     return matches[0]
 
@@ -90,13 +90,18 @@ def target_ref(pr, repo_id, owner_id, default_branch, sha):
     return ref
 
 
-def build_commit(sha, task, patch, index_path, pr_number):
+def build_commit(
+    sha, task, patch, index_path, pr_number,
+    *,
+    author=("github-actions[bot]", "41898282+github-actions[bot]@users.noreply.github.com"),
+):
+    name, email = author
     env = os.environ | {
         "GIT_INDEX_FILE": str(index_path),
-        "GIT_AUTHOR_NAME": "github-actions[bot]",
-        "GIT_AUTHOR_EMAIL": "41898282+github-actions[bot]@users.noreply.github.com",
-        "GIT_COMMITTER_NAME": "github-actions[bot]",
-        "GIT_COMMITTER_EMAIL": "41898282+github-actions[bot]@users.noreply.github.com",
+        "GIT_AUTHOR_NAME": name,
+        "GIT_AUTHOR_EMAIL": email,
+        "GIT_COMMITTER_NAME": name,
+        "GIT_COMMITTER_EMAIL": email,
     }
     require(
         git("cat-file", "-t", f"{sha}:{task}").strip() == b"blob",
@@ -139,7 +144,7 @@ def main():
     pages = api(
         f"{repo_api}/issues/{pr_number}/comments?per_page=100", "--paginate", "--slurp"
     )
-    task = find_task(
+    _, task = find_request(
         (comment for page in pages for comment in page), owner_id, response, request_id, sha
     )
     git("fetch", "--no-tags", "origin", f"refs/pull/{pr_number}/head")
