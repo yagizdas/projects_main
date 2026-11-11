@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#4169a9">
+  <meta name="description" content="A calm, detailed weather forecast from Open-Meteo.">
+  <title>Atmos — Weather, beautifully simple</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body data-weather="clear" data-night="false">
+  <div class="sky" aria-hidden="true"><span class="orb"></span><span class="cloud cloud-one"></span><span class="cloud cloud-two"></span></div>
+  <main class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="Atmos home"><span class="brand-mark">A</span><span>Atmos</span></a>
+      <div class="actions">
+        <div class="units" role="group" aria-label="Temperature unit">
+          <button class="unit active" data-unit="c" aria-pressed="true">°C</button><button class="unit" data-unit="f" aria-pressed="false">°F</button>
+        </div>
+        <button id="locate" class="icon-button" aria-label="Use my current location" title="Use my location">⌖</button>
+      </div>
+    </header>
+
+    <section class="search-wrap" aria-label="Find a city">
+      <form id="search-form" class="search-form" role="search">
+        <label class="sr-only" for="city-search">Search for a city</label>
+        <span aria-hidden="true">⌕</span>
+        <input id="city-search" autocomplete="off" placeholder="Search city or place…" aria-controls="suggestions" aria-autocomplete="list">
+        <button type="submit">Search</button>
+      </form>
+      <ul id="suggestions" class="suggestions" role="listbox" hidden></ul>
+    </section>
+
+    <div id="status" class="status" role="status" aria-live="polite"><span class="spinner"></span> Reading the sky…</div>
+    <div id="error" class="error" role="alert" hidden><strong>We lost sight of the sky.</strong><span id="error-message"></span><button id="retry">Try again</button></div>
+
+    <div id="weather" hidden>
+      <section class="hero">
+        <div>
+          <p class="eyebrow" id="local-time">Local weather</p>
+          <h1 id="place">Munich</h1>
+          <p class="condition"><span id="condition-icon" aria-hidden="true"></span><span id="condition"></span></p>
+        </div>
+        <div class="temperature"><span id="temperature">--</span><sup id="temperature-unit">°C</sup></div>
+        <div class="details">
+          <div><span>Feels like</span><strong id="feels">--</strong></div>
+          <div><span>Wind</span><strong id="wind">--</strong></div>
+          <div><span>Humidity</span><strong id="humidity">--</strong></div>
+          <div><span>Precipitation</span><strong id="precipitation">--</strong></div>
+        </div>
+      </section>
+
+      <section class="forecast-card">
+        <div class="section-heading"><div><p class="eyebrow">Today</p><h2>Next 24 hours</h2></div><span>Swipe to explore →</span></div>
+        <div id="hourly" class="hourly" tabindex="0" aria-label="24 hour forecast"></div>
+      </section>
+
+      <section class="forecast-card weekly-card">
+        <div class="section-heading"><div><p class="eyebrow">The week ahead</p><h2>7-day outlook</h2></div></div>
+        <div id="daily" class="daily"></div>
+      </section>
+    </div>
+    <footer>Forecast data by <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Open-Meteo</a></footer>
+  </main>
+  <script src="./app.js" defer></script>
+</body>
+</html>
