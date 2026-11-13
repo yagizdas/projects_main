@@ -11,12 +11,14 @@ dependencies = ["Pillow>=10"]
 
 [project.optional-dependencies]
 gpu = ["torch>=2.1", "transformers>=4.49", "accelerate>=1"]
+data = ["datasets>=3"]
 test = ["pytest>=8"]
 
 [project.scripts]
 ug-step0 = "ug_multiregion.cli:step0_main"
 ug-step1 = "ug_multiregion.cli:step1_main"
 ug-baseline = "ug_multiregion.cli:baseline_main"
+prepare-data = "ug_multiregion.prepare:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

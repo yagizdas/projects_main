@@ -49,7 +49,8 @@ class TransformersModel:
     def _inputs(self, images: list[Image.Image], question: str):
         content = [{"type": "image"} for _ in images] + [{"type": "text", "text": question}]
         prompt = self.processor.apply_chat_template(
-            [{"role": "user", "content": content}], add_generation_prompt=True, tokenize=False)
+            [{"role": "system", "content": "You are a helpful assistant."},
+             {"role": "user", "content": content}], add_generation_prompt=True, tokenize=False)
         values = self.processor(text=[prompt], images=images, return_tensors="pt")
         return {key: value.to(self.model.device) for key, value in values.items()}
 

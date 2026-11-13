@@ -57,7 +57,7 @@ def greedy_select(crops: list[Crop], question: str, model: VisionLanguageModel, 
 
 def run(samples: list[Sample], model: VisionLanguageModel, crop_sizes: list[float], k: int,
         step: int, oracle_padding: float = 0.25, min_gain: float = 0.0,
-        max_greedy_crops: int | None = None) -> list[Prediction]:
+        max_greedy_crops: int | None = None, include_oracle: bool = True) -> list[Prediction]:
     output = []
     for sample in samples:
         with Image.open(sample.image) as source:
@@ -67,7 +67,7 @@ def run(samples: list[Sample], model: VisionLanguageModel, crop_sizes: list[floa
         output.append(_predict(sample, image, "ug_top1", [scored[0][1]], scored[0][0], model))
         topk = [crop for _, crop in scored[:k]]
         output.append(_predict(sample, image, f"ug_top{k}", topk, model.entropy([image, *[c.image for c in topk]], sample.question), model))
-        oracle = oracle_crops(image, sample.boxes, oracle_padding)
+        oracle = oracle_crops(image, sample.boxes, oracle_padding) if include_oracle else []
         if oracle:
             output.append(_predict(sample, image, "oracle", oracle, model.entropy([image, *[c.image for c in oracle]], sample.question), model))
         if step == 1:

@@ -59,7 +59,8 @@ def main(step: int, argv: list[str] | None = None) -> None:
     samples = load_samples(dataset, args.benchmark, args.limit)
     model = make_model(args.model, args.dry_run, args.max_new_tokens)
     predictions = run(samples, model, ratios, args.k, step, args.oracle_padding,
-                      getattr(args, "min_gain", 0.0), getattr(args, "max_greedy_crops", None))
+                      getattr(args, "min_gain", 0.0), getattr(args, "max_greedy_crops", None),
+                      include_oracle=args.benchmark == "vstar")
     write_results(predictions, args.output)
     print(Path(args.output, "results.md").read_text(), end="")
     if temporary: temporary.cleanup()

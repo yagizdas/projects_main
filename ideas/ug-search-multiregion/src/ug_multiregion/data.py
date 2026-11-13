@@ -17,6 +17,7 @@ class Sample:
     answer: str
     boxes: tuple[tuple[float, float, float, float], ...] = ()
     category: str = ""
+    target_objects: tuple[str, ...] = ()
 
 
 def _records(path: Path) -> list[dict[str, Any]]:
@@ -84,6 +85,7 @@ def load_samples(path: str | Path, benchmark: str, limit: int | None = None) -> 
             answer=str(_value(row, "answer", "label", "gt_answer")),
             boxes=_boxes(_value(row, "boxes", "oracle_boxes", "gt_boxes", "bboxes", default=[])),
             category=category,
+            target_objects=tuple(str(value) for value in _value(row, "target_objects", "target_object", default=[])),
         ))
         if limit is not None and len(samples) >= limit:
             break

@@ -27,6 +27,18 @@ pip install -e '.[test]'
 pytest
 ```
 
+Download both benchmarks into the exact JSON/image layout consumed by the Step CLIs:
+
+```bash
+pip install -e '.[data]'
+prepare-data --output data
+```
+
+V* uses the bbox-restored Hugging Face export because the lmms-eval mirror omits the original
+human boxes. HR-Bench's Hugging Face schema contains no ground-truth boxes, so oracle evaluation
+is intentionally V*-only. See `results/dataset_stats.md` for the audited counts. For a GPU run with
+no local setup, open `notebooks/run_all.ipynb` in Colab and choose **Runtime → Run all**.
+
 For real runs, follow `third_party/ug-framework/README.md` to create its `ug` environment, including
 Flash Attention, then install this package with `pip install -e '.[gpu]'`.
 
