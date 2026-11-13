@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import hashlib
-import math
-import random
 from typing import Protocol
 from PIL import Image, ImageStat
+
+from .official import entropy_hook
 
 
 class VisionLanguageModel(Protocol):
@@ -31,9 +31,10 @@ class MockModel:
 
 class TransformersModel:
     """Generic Hugging Face image-text-to-text adapter using generated-token entropy."""
-    def __init__(self, model_id: str, max_new_tokens: int = 32):
+    def __init__(self, model_id: str, max_new_tokens: int = 128):
         try:
             import torch
+            import torch.nn.functional as functional
             from transformers import AutoModelForImageTextToText, AutoProcessor
         except ImportError as exc:
             raise RuntimeError("Install the 'gpu' extra to use a real model") from exc
@@ -42,6 +43,8 @@ class TransformersModel:
         self.model = AutoModelForImageTextToText.from_pretrained(
             model_id, torch_dtype="auto", device_map="auto", trust_remote_code=True).eval()
         self.max_new_tokens = max_new_tokens
+        self.cur_entropy: list[float] = []
+        self._entropy_hook = entropy_hook(torch, functional).__get__(self)
 
     def _inputs(self, images: list[Image.Image], question: str):
         content = [{"type": "image"} for _ in images] + [{"type": "text", "text": question}]
@@ -59,12 +62,13 @@ class TransformersModel:
         return inputs, output
 
     def entropy(self, images: list[Image.Image], question: str) -> float:
-        _, output = self._generate(images, question, scores=True)
-        entropies = []
-        for logits in output.scores:
-            probabilities = logits[0].float().softmax(-1)
-            entropies.append(float(-(probabilities * probabilities.clamp_min(1e-12).log()).sum()))
-        return sum(entropies) / len(entropies) if entropies else math.inf
+        self.cur_entropy = []
+        handle = self.model.lm_head.register_forward_hook(self._entropy_hook)
+        try:
+            self._generate(images, question)
+        finally:
+            handle.remove()
+        return sum(self.cur_entropy) / len(self.cur_entropy) if self.cur_entropy else float("inf")
 
     def answer(self, images: list[Image.Image], question: str, choices: list[str] | None = None) -> str:
         if choices:
@@ -74,5 +78,5 @@ class TransformersModel:
         return self.processor.batch_decode(output.sequences[:, length:], skip_special_tokens=True)[0].strip()
 
 
-def make_model(model_id: str, dry_run: bool, max_new_tokens: int = 32) -> VisionLanguageModel:
+def make_model(model_id: str, dry_run: bool, max_new_tokens: int = 128) -> VisionLanguageModel:
     return MockModel() if dry_run else TransformersModel(model_id, max_new_tokens)

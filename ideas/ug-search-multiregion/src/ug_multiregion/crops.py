@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from PIL import Image
 
+from .official import sliding_windows
+
 
 @dataclass(frozen=True)
 class Crop:
@@ -13,24 +15,16 @@ class Crop:
     image: Image.Image
 
 
-def sliding_crops(image: Image.Image, sizes: list[float], overlap: float = 0.5) -> list[Crop]:
-    width, height = image.size
-    crops: list[Crop] = []
-    seen = set()
-    for ratio in sizes:
-        if not 0 < ratio <= 1:
-            raise ValueError("crop sizes must be ratios in (0, 1]")
-        cw, ch = max(1, round(width * ratio)), max(1, round(height * ratio))
-        sx, sy = max(1, round(cw * (1 - overlap))), max(1, round(ch * (1 - overlap)))
-        xs = list(range(0, max(1, width - cw + 1), sx))
-        ys = list(range(0, max(1, height - ch + 1), sy))
-        xs.append(width - cw); ys.append(height - ch)
-        for y in sorted(set(ys)):
-            for x in sorted(set(xs)):
-                box = (x, y, x + cw, y + ch)
-                if box not in seen:
-                    seen.add(box)
-                    crops.append(Crop(f"crop-{len(crops):04d}", box, image.crop(box)))
+def sliding_crops(image: Image.Image, ratios: list[float]) -> list[Crop]:
+    """Wrap the official implementation for one or more visual crop ratios."""
+    crops, seen = [], set()
+    for ratio in ratios:
+        if ratio <= 1:
+            raise ValueError("visual crop ratios must be greater than 1")
+        for box, crop_image in sliding_windows(image, ratio):
+            if box not in seen:
+                seen.add(box)
+                crops.append(Crop(f"crop-{len(crops):04d}", box, crop_image))
     return crops
 
 
@@ -44,5 +38,5 @@ def oracle_crops(image: Image.Image, boxes: tuple[tuple[float, float, float, flo
         dx, dy = (x2 - x1) * padding, (y2 - y1) * padding
         box = (max(0, int(x1 - dx)), max(0, int(y1 - dy)), min(width, int(x2 + dx)), min(height, int(y2 + dy)))
         if box[2] > box[0] and box[3] > box[1]:
-            result.append(Crop(f"oracle-{index:04d}", box, image.crop(box)))
+            result.append(Crop(f"oracle-{index:04d}", box, image.crop(box).resize(image.size, Image.Resampling.LANCZOS)))
     return result

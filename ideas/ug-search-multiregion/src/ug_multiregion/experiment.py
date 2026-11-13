@@ -29,23 +29,24 @@ def _correct(prediction: str, answer: str) -> bool:
     return clean(prediction) == clean(answer)
 
 
-def _predict(sample: Sample, setting: str, crops: list[Crop], entropy: float | None,
+def _predict(sample: Sample, image: Image.Image, setting: str, crops: list[Crop], entropy: float | None,
              model: VisionLanguageModel) -> Prediction:
-    prediction = model.answer([crop.image for crop in crops], sample.question)
+    prediction = model.answer([image, *[crop.image for crop in crops]], sample.question)
     return Prediction(sample.id, setting, prediction, sample.answer, _correct(prediction, sample.answer),
                       [crop.id for crop in crops], [crop.box for crop in crops], entropy)
 
 
 def greedy_select(crops: list[Crop], question: str, model: VisionLanguageModel, min_gain: float = 0.0,
-                  max_crops: int | None = None) -> tuple[list[Crop], float]:
+                  max_crops: int | None = None, original: Image.Image | None = None) -> tuple[list[Crop], float]:
     """Select the best singleton, then add regions only while joint entropy falls."""
     if not crops:
         raise ValueError("No candidate crops")
-    scored = [(model.entropy([crop.image], question), crop) for crop in crops]
+    prefix = [original] if original is not None else []
+    scored = [(model.entropy(prefix + [crop.image], question), crop) for crop in crops]
     entropy, first = min(scored, key=lambda item: item[0])
     selected, remaining = [first], [crop for crop in crops if crop.id != first.id]
     while remaining and (max_crops is None or len(selected) < max_crops):
-        candidates = [(model.entropy([c.image for c in selected] + [crop.image], question), crop)
+        candidates = [(model.entropy(prefix + [c.image for c in selected] + [crop.image], question), crop)
                       for crop in remaining]
         next_entropy, crop = min(candidates, key=lambda item: item[0])
         if entropy - next_entropy <= min_gain:
@@ -62,16 +63,16 @@ def run(samples: list[Sample], model: VisionLanguageModel, crop_sizes: list[floa
         with Image.open(sample.image) as source:
             image = source.convert("RGB")
         crops = sliding_crops(image, crop_sizes)
-        scored = sorted(((model.entropy([crop.image], sample.question), crop) for crop in crops), key=lambda x: x[0])
-        output.append(_predict(sample, "ug_top1", [scored[0][1]], scored[0][0], model))
+        scored = sorted(((model.entropy([image, crop.image], sample.question), crop) for crop in crops), key=lambda x: x[0])
+        output.append(_predict(sample, image, "ug_top1", [scored[0][1]], scored[0][0], model))
         topk = [crop for _, crop in scored[:k]]
-        output.append(_predict(sample, f"ug_top{k}", topk, model.entropy([c.image for c in topk], sample.question), model))
+        output.append(_predict(sample, image, f"ug_top{k}", topk, model.entropy([image, *[c.image for c in topk]], sample.question), model))
         oracle = oracle_crops(image, sample.boxes, oracle_padding)
         if oracle:
-            output.append(_predict(sample, "oracle", oracle, model.entropy([c.image for c in oracle], sample.question), model))
+            output.append(_predict(sample, image, "oracle", oracle, model.entropy([image, *[c.image for c in oracle]], sample.question), model))
         if step == 1:
-            selected, entropy = greedy_select(crops, sample.question, model, min_gain, max_greedy_crops)
-            output.append(_predict(sample, "greedy", selected, entropy, model))
+            selected, entropy = greedy_select(crops, sample.question, model, min_gain, max_greedy_crops, image)
+            output.append(_predict(sample, image, "greedy", selected, entropy, model))
     return output
 
 
