@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
-"""Fetch current Munich grocery offers from Marktguru's public web API."""
-
+"""Fetch this week's Munich grocery offers from Marktguru's public web API."""
 from __future__ import annotations
-
 import argparse
 import datetime as dt
 import html
@@ -21,52 +19,33 @@ POSTCODE = "80804"
 RETAILERS = ("penny", "rewe", "edeka", "lidl", "aldi-sued")
 PAGE_SIZE = 100
 SITE = "https://www.marktguru.de"
+BERLIN = ZoneInfo("Europe/Berlin")
 
-# Marktguru has no food/non-food flag. Keep the rules conservative and auditable.
+# Offer objects do not contain Marktguru category IDs (product and brand IDs are unrelated).
 ALCOHOL = re.compile(
     r"(?:\balkohol|\bbier(?!stangerl|schinken)|\bweizen(?:bier)?\b|\bpils\b|\bradler\b|"
-    r"(?<!sch)wein|\bsekt\b|\bprosecco\b|\bchampagner\b|\bspirituose|\bwhisk(?:y|ey)\b|"
-    r"\bwodka\b|\bvodka\b|\bgin\b|\brum\b|likör|\baperitif\b|\bcognac\b|\bbrandy\b|%\s*vol)", re.I
-)
+    r"(?<!sch)wein|\bsekt\b|\bprosecco\b|\bspumante\b|\bchampagner\b|\bspirituose|\bwhisk(?:y|ey)\b|"
+    r"\bwodka\b|\bvodka\b|\bgin\b|\brum\b|likör|\baperitif\b|\bcognac\b|\bbrandy\b|%\s*vol)", re.I)
 NON_FOOD = re.compile(
-    r"\b(akku|bohrer|werkzeug|staubsauger|reiniger|waschmittel|spülmittel|shampoo|"
-    r"dusche|deo|parfüm|kosmetik|creme|zahnpasta|toilettenpapier|küchenrolle|windel|"
-    r"shirt|shorts|hose|strumpfhose|leggings|jogginghose|socken|schuh|jacke|kleid|pullover|wäsche|textil|handtuch|"
-    r"spielzeug|deko|dekoration|kerze|lampe|kissen|decke|möbel|topf|pfanne|geschirr|besteck|"
-    r"glas|tasse|elektr|gerät|batterie|kabel|kopfhörer|smartphone|fernseher|fahrrad|"
-    r"garten|pflanze|blume|tanne|weihnachtsbaum|nordmann|tierfutter|hundefutter|katzenfutter|"
-    r"grill|kohle|matratze|kraftstation|weinregal|nahrungsergänzung|supplement|vitamin(?:e)?|"
-    r"mineralstoff|magnesium|zink|kapsel|tablette|brausetablette|mivolis|altapharma)\b", re.I
-)
-
-APP_PRICE = re.compile(r"\bMIT\b[^\n]{0,40}?\bAPP\b[^\d]{0,12}(\d+[.,]\d{2})\s*€", re.I)
-PACK_SIZE = re.compile(
-    r"\bje\s+(\d+(?:[.,]\d+)?(?:\s*[x×]\s*\d+(?:[.,]\d+)?)?\s*"
-    r"(?:kg|g|mg|l|ml|cl|st(?:k|\.)?|stück))\b(?:-packung)?",
-    re.I,
-)
-
-CATEGORIES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
-    (name, re.compile(words, re.I))
-    for name, words in (
-        ("Obst & Gemüse", r"obst|gemüse|apfel|banane|beere|traube|tomate|gurke|salat|kartoffel"),
-        ("Fleisch & Fisch", r"fleisch|wurst|schinken|hähn|pute|rind|schwein|fisch|lachs|garnele"),
-        ("Milchprodukte & Eier", r"milch|käse|joghurt|quark|butter|sahne|ei(er)?\b"),
-        ("Backwaren", r"brot|brötchen|baguette|toast|kuchen|gebäck|croissant"),
-        ("Getränke", r"wasser|saft|limonade|cola|tee|kaffee|drink"),
-        ("Süßes & Snacks", r"schokolade|keks|bonbon|chips|snack|nüsse|eis\b"),
-        ("Tiefkühlkost", r"tiefkühl|pizza|pommes"),
-        ("Vorrat & Kochen", r"nudel|reis|mehl|zucker|öl|sauce|suppe|konserve|gewürz"),
-    )
-)
+    r"\b(?:akku\w*|bohrer|farbrolle|werkzeug|staubsauger|reiniger|waschmittel|spülmittel|"
+    r"shampoo|duschgel|deo|parfüm|kosmetik|zahnpasta|toilettenpapier|küchenrolle|windel|"
+    r"shirt|shorts|hose|strumpf|leggings|socke|schuh|jacke|kleid|pullover|wäsche|textil|"
+    r"\w*bettwäsche|\w*betttuch|handtuch|puma|spielzeug|deko|(?:duft|stumpen)?kerzen?|lampe|kissen|decke|möbel|geschirr|besteck|"
+    r"tasse|elektronik|batterie|kabel|kopfhörer|smartphone|fernseher|fahrrad|matratze|"
+    r"garten|pflanze|blume|tanne|weihnachtsstern|baumständer|wärmflasche|buch|karte|"
+    r"tierfutter|hundefutter|katzenfutter|katzennahrung|felix|whiskas|pedigree|vitamin\s*[a-z0-9]|"
+    r"nahrungsergänzung|supplement|magnesium|zink|home creation|gardenline|jes collection)\b", re.I)
+PACK = re.compile(
+    r"(?<![\d,])(?P<amount>\d+(?:[.,]\d+)?)\s*(?:-\s*)?(?P<unit>kg|g|mg|l|ml|cl)"
+    r"(?:\s*[- ]?(?:packung|pack|beutel|flasche|dose|glas|schale|figur))?\b", re.I)
+APP_PRICE = re.compile(r"\b(?:mit\s+\w+\s+)?app\b.*?(\d+[.,]\d{2})\s*€", re.I)
 
 
 def request_json(url: str, headers: dict[str, str], attempts: int = 3) -> dict[str, Any]:
-    """Request JSON with a small retry budget for transient API failures."""
     for attempt in range(attempts):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "deal-fetcher/1.0", **headers})
-            with urllib.request.urlopen(req, timeout=30) as response:
+            request = urllib.request.Request(url, headers={"User-Agent": "deal-fetcher/1.0", **headers})
+            with urllib.request.urlopen(request, timeout=30) as response:
                 return json.load(response)
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
             if attempt + 1 == attempts:
@@ -76,9 +55,8 @@ def request_json(url: str, headers: dict[str, str], attempts: int = 3) -> dict[s
 
 
 def api_headers() -> dict[str, str]:
-    """Read the current public API credentials embedded in Marktguru's HTML."""
-    req = urllib.request.Request(f"{SITE}/r/penny", headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=30) as response:
+    request = urllib.request.Request(f"{SITE}/r/penny", headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(request, timeout=30) as response:
         page = response.read().decode("utf-8")
     match = re.search(r'<script type="application/json">(.*?)</script>', page, re.S)
     if not match:
@@ -92,8 +70,7 @@ def fetch_retailer(retailer: str, headers: dict[str, str]) -> list[dict[str, Any
     offset = 0
     while True:
         query = urllib.parse.urlencode({"as": "mobile", "zipCode": POSTCODE, "limit": PAGE_SIZE, "offset": offset})
-        url = f"https://api.marktguru.de/api/v1/advertisers/retailer/{retailer}/offers?{query}"
-        payload = request_json(url, headers)
+        payload = request_json(f"https://api.marktguru.de/api/v1/advertisers/retailer/{retailer}/offers?{query}", headers)
         batch = payload.get("results", [])
         offers.extend(batch)
         offset += len(batch)
@@ -101,94 +78,132 @@ def fetch_retailer(retailer: str, headers: dict[str, str]) -> list[dict[str, Any
             return offers
 
 
-def category_for(text: str) -> str:
-    return next((category for category, pattern in CATEGORIES if pattern.search(text)), "Sonstige Lebensmittel")
-
-
 def local_date(value: str) -> dt.date:
-    """Convert a Marktguru UTC timestamp to its calendar date in Berlin."""
-    return dt.datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/Berlin")).date()
+    return dt.datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(BERLIN).date()
 
 
-def normalize(raw: dict[str, Any], run_date: dt.date | None = None) -> dict[str, Any] | None:
-    product = raw.get("product") or {}
-    brand = raw.get("brand") or {}
-    name = product.get("name") or ""
+def parse_pack(raw: dict[str, Any], text: str) -> str | None:
+    match = PACK.search(text)
+    if match:
+        return f"{match.group('amount').replace('.', ',')} {match.group('unit')}"
+    volume, quantity, unit = raw.get("volume"), raw.get("quantity"), raw.get("unit") or {}
+    if volume and unit.get("shortName"):
+        amount = f"{volume:g}".replace(".", ",")
+        pack = f"{amount} {unit['shortName']}"
+        return f"{quantity:g} × {pack}" if quantity and quantity != 1 else pack
+    return None
+
+
+def normalize(raw: dict[str, Any], today: dt.date) -> dict[str, Any] | None:
+    product, brand = raw.get("product") or {}, raw.get("brand") or {}
+    name, brand_name = product.get("name") or "", brand.get("name") or ""
     description = raw.get("description") or ""
-    text = f"{name} {brand.get('name', '')} {description}"
-    if ALCOHOL.search(text) or NON_FOOD.search(text):
+    text = f"{name} {brand_name} {description}"
+    if not name or ALCOHOL.search(text) or NON_FOOD.search(text):
         return None
-
-    run_date = run_date or dt.datetime.now(dt.timezone.utc).astimezone(ZoneInfo("Europe/Berlin")).date()
-    valid_from = local_date(raw["validFrom"])
-    valid_to = local_date(raw["validTo"])
-    if valid_to < run_date or valid_from > run_date + dt.timedelta(days=7):
+    start, end = local_date(raw["validFrom"]), local_date(raw["validTo"])
+    if end < today or start > today + dt.timedelta(days=6):
         return None
-
-    unit = raw.get("unit") or {}
-    volume = raw.get("volume")
-    quantity = raw.get("quantity")
-    pack_match = PACK_SIZE.search(description)
-    pack_size = re.sub(r"\s+", " ", pack_match.group(1)).replace(",", ".") if pack_match else None
-    if not pack_size and volume and unit.get("shortName"):
-        pack_size = f"{volume:g} {unit['shortName']}"
-        if quantity and quantity != 1:
-            pack_size = f"{quantity:g} × {pack_size}"
     app_match = APP_PRICE.search(description)
+    old_price = raw.get("oldPrice")
     return {
+        "store": (raw.get("retailer") or {}).get("name") or "Unbekannt",
         "product": name,
-        "brand": brand.get("name"),
+        "brand": None if brand_name == "thisisnobrand123" else brand_name,
         "price": raw.get("price"),
         "app_price": float(app_match.group(1).replace(",", ".")) if app_match else None,
-        "normal_price": raw.get("oldPrice") or None,
+        "normal_price": old_price if old_price and old_price > 0 else None,
         "unit_price": raw.get("referencePrice"),
-        "unit": unit.get("shortName"),
-        "pack": pack_size,
-        "from": valid_from.isoformat(),
-        "to": valid_to.isoformat(),
-        "category": category_for(text),
+        "unit": (raw.get("unit") or {}).get("shortName"),
+        "pack": parse_pack(raw, description + " " + name),
+        "from": start,
+        "to": end,
     }
 
 
-def run(output_dir: Path) -> tuple[dict[str, int], list[str]]:
-    headers = api_headers()
-    fields = [
-        "product", "brand", "price", "app_price", "normal_price", "unit_price",
-        "unit", "pack", "from", "to", "category",
-    ]
-    stores: dict[str, dict[str, Any]] = {}
-    counts: dict[str, int] = {}
-    errors: list[str] = []
+def money(value: float) -> str:
+    return f"{value:.2f}".replace(".", ",")
+
+
+def date_range(start: dt.date, end: dt.date) -> str:
+    return f"{start:%d.%m.}–{end:%d.%m.}"
+
+
+def offer_line(offer: dict[str, Any]) -> str:
+    product = offer["product"]
+    if offer.get("brand"):
+        product += f" ({offer['brand']})"
+    price_parts = []
+    if offer.get("price") is not None:
+        price_parts.append(f"{money(offer['price'])} €")
+    if offer.get("app_price") is not None:
+        price_parts.append(f"App {money(offer['app_price'])}")
+    parts = [product]
+    if price_parts:
+        parts.append(" · ".join(price_parts))
+    if offer.get("pack"):
+        parts.append(offer["pack"])
+    if offer.get("unit_price") is not None and offer.get("unit"):
+        parts.append(f"{money(offer['unit_price'])}/{offer['unit']}")
+    if offer.get("normal_price") is not None:
+        parts.append(f"statt {money(offer['normal_price'])}")
+    return " | ".join(parts)
+
+
+def render_markdown(offers: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
+    unique: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    for offer in offers:
+        key = (offer["store"], offer["from"], offer["to"], offer_line(offer))
+        if key not in seen:
+            seen.add(key)
+            unique.append(offer)
+    unique.sort(key=lambda item: (item["store"], item["from"], item["to"], item["product"].casefold()))
+    lines: list[str] = []
+    current = None
+    for offer in unique:
+        group = (offer["store"], offer["from"], offer["to"])
+        if group != current:
+            if lines:
+                lines.append("")
+            lines.append(f"## {offer['store']} · {date_range(offer['from'], offer['to'])}")
+            current = group
+        lines.append(offer_line(offer))
+    return "\n".join(lines) + "\n", unique
+
+
+def run(output_dir: Path) -> tuple[dict[str, int], list[str], int]:
+    today = dt.datetime.now(BERLIN).date()
+    headers, offers, errors = api_headers(), [], []
     for retailer in RETAILERS:
         try:
-            raw = fetch_retailer(retailer, headers)
-            cleaned = [offer for item in raw if (offer := normalize(item)) is not None]
-            store = (raw[0].get("retailer") or {}).get("name", retailer.upper()) if raw else retailer.upper()
-            compact = [[offer[field] for field in fields] for offer in cleaned]
-            stores[store] = {"fields": fields, "offers": compact}
-            counts[store] = len(cleaned)
-        except Exception as exc:  # Continue so one unavailable retailer does not erase all data.
+            offers.extend(offer for item in fetch_retailer(retailer, headers) if (offer := normalize(item, today)))
+        except Exception as exc:  # Preserve data from the other retailers.
             errors.append(f"{retailer.upper()}: {type(exc).__name__}: {exc}")
-            counts[retailer.upper()] = 0
-
+    rendered, offers = render_markdown(offers)
+    stores = ("PENNY", "REWE", "EDEKA", "Lidl", "ALDI SÜD")
+    counts = {name: sum(offer["store"] == name for offer in offers) for name in stores}
+    normal_prices = sum(offer["normal_price"] is not None for offer in offers)
     output_dir.mkdir(parents=True, exist_ok=True)
-    today = dt.datetime.now(dt.timezone.utc).astimezone(ZoneInfo("Europe/Berlin")).date().isoformat()
-    rendered = json.dumps({"generated": today, "stores": stores}, ensure_ascii=False, separators=(",", ":")) + "\n"
-    (output_dir / "latest.json").write_text(rendered, encoding="utf-8")
-    (output_dir / f"{today}.json").write_text(rendered, encoding="utf-8")
-    lines = [f"Generated: {today}", f"Postcode: {POSTCODE}"]
+    for old in output_dir.glob("*.json"):
+        old.unlink()
+    (output_dir / "latest.md").write_text(rendered, encoding="utf-8")
+    (output_dir / f"{today.isoformat()}.md").write_text(rendered, encoding="utf-8")
+    lines = [f"Generated: {today.isoformat()}", f"Postcode: {POSTCODE}"]
     lines.extend(f"{store}: {count}" for store, count in counts.items())
+    lines.extend((f"Offers with normal price: {normal_prices}/{len(offers)}", f"File size: {len(rendered.encode('utf-8'))} bytes"))
     lines.append("Errors: " + ("; ".join(errors) if errors else "none"))
     (output_dir / "summary.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return counts, errors
+    return counts, errors, normal_prices
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path(__file__).with_name("data"))
     args = parser.parse_args()
-    counts, errors = run(args.output)
+    counts, errors, normal_prices = run(args.output)
     print(" | ".join(f"{store} {count}" for store, count in counts.items()))
+    print(f"Normal prices: {normal_prices}/{sum(counts.values())}")
     if errors:
         print("Errors: " + "; ".join(errors), file=sys.stderr)
     return bool(errors)

@@ -1,8 +1,10 @@
 Generated: 2026-11-22
 Postcode: 80804
-PENNY: 296
-REWE: 327
-EDEKA: 266
-Lidl: 387
-ALDI SÜD: 167
+PENNY: 290
+REWE: 317
+EDEKA: 272
+Lidl: 386
+ALDI SÜD: 168
+Offers with normal price: 46/1433
+File size: 86518 bytes
 Errors: none
