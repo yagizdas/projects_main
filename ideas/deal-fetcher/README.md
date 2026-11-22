@@ -11,9 +11,10 @@ python ideas/deal-fetcher/fetch_deals.py
 
 The command overwrites `data/latest.json`, archives the same result as
 `data/YYYY-MM-DD.json`, and records store counts and errors in `data/summary.txt`.
-Each offer has stable fields even when Marktguru does not provide a value. An
-app/coupon-marked offer is stored in `app_price`; the numeric `unit_price` and its
-`unit` are separate fields. Filtering and category heuristics live near the top of
+`latest.json` groups stores and encodes offers as compact arrays. Each store's
+`fields` array documents the positions; missing values are `null`. App prices and
+pack sizes are extracted from offer text, while `normal_price` is Marktguru's
+strike-through price. Filtering and category heuristics live near the top of
 `fetch_deals.py` for easy maintenance.
 
 The GitHub Actions workflow runs at 11:00 UTC each Sunday (12:00 in Berlin during

@@ -15,6 +15,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 POSTCODE = "80804"
 RETAILERS = ("penny", "rewe", "edeka", "lidl", "aldi-sued")
@@ -31,9 +32,18 @@ NON_FOOD = re.compile(
     r"\b(akku|bohrer|werkzeug|staubsauger|reiniger|waschmittel|spülmittel|shampoo|"
     r"dusche|deo|parfüm|kosmetik|creme|zahnpasta|toilettenpapier|küchenrolle|windel|"
     r"shirt|shorts|hose|strumpfhose|leggings|jogginghose|socken|schuh|jacke|kleid|pullover|wäsche|textil|handtuch|"
-    r"spielzeug|deko|kerze|lampe|kissen|decke|möbel|topf|pfanne|geschirr|besteck|"
+    r"spielzeug|deko|dekoration|kerze|lampe|kissen|decke|möbel|topf|pfanne|geschirr|besteck|"
     r"glas|tasse|elektr|gerät|batterie|kabel|kopfhörer|smartphone|fernseher|fahrrad|"
-    r"garten|pflanze|blume|tierfutter|hundefutter|katzenfutter|grill|kohle|matratze|kraftstation|weinregal)\b", re.I
+    r"garten|pflanze|blume|tanne|weihnachtsbaum|nordmann|tierfutter|hundefutter|katzenfutter|"
+    r"grill|kohle|matratze|kraftstation|weinregal|nahrungsergänzung|supplement|vitamin(?:e)?|"
+    r"mineralstoff|magnesium|zink|kapsel|tablette|brausetablette|mivolis|altapharma)\b", re.I
+)
+
+APP_PRICE = re.compile(r"\bMIT\b[^\n]{0,40}?\bAPP\b[^\d]{0,12}(\d+[.,]\d{2})\s*€", re.I)
+PACK_SIZE = re.compile(
+    r"\bje\s+(\d+(?:[.,]\d+)?(?:\s*[x×]\s*\d+(?:[.,]\d+)?)?\s*"
+    r"(?:kg|g|mg|l|ml|cl|st(?:k|\.)?|stück))\b(?:-packung)?",
+    re.I,
 )
 
 CATEGORIES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
@@ -95,7 +105,12 @@ def category_for(text: str) -> str:
     return next((category for category, pattern in CATEGORIES if pattern.search(text)), "Sonstige Lebensmittel")
 
 
-def normalize(raw: dict[str, Any]) -> dict[str, Any] | None:
+def local_date(value: str) -> dt.date:
+    """Convert a Marktguru UTC timestamp to its calendar date in Berlin."""
+    return dt.datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/Berlin")).date()
+
+
+def normalize(raw: dict[str, Any], run_date: dt.date | None = None) -> dict[str, Any] | None:
     product = raw.get("product") or {}
     brand = raw.get("brand") or {}
     name = product.get("name") or ""
@@ -104,53 +119,64 @@ def normalize(raw: dict[str, Any]) -> dict[str, Any] | None:
     if ALCOHOL.search(text) or NON_FOOD.search(text):
         return None
 
+    run_date = run_date or dt.datetime.now(dt.timezone.utc).astimezone(ZoneInfo("Europe/Berlin")).date()
+    valid_from = local_date(raw["validFrom"])
+    valid_to = local_date(raw["validTo"])
+    if valid_to < run_date or valid_from > run_date + dt.timedelta(days=7):
+        return None
+
     unit = raw.get("unit") or {}
     volume = raw.get("volume")
     quantity = raw.get("quantity")
-    pack_size = None
-    if volume and unit.get("shortName"):
+    pack_match = PACK_SIZE.search(description)
+    pack_size = re.sub(r"\s+", " ", pack_match.group(1)).replace(",", ".") if pack_match else None
+    if not pack_size and volume and unit.get("shortName"):
         pack_size = f"{volume:g} {unit['shortName']}"
         if quantity and quantity != 1:
             pack_size = f"{quantity:g} × {pack_size}"
-    is_app = bool(re.search(r"\b(app|coupon)\b", description, re.I))
+    app_match = APP_PRICE.search(description)
     return {
-        "store": (raw.get("retailer") or {}).get("name"),
         "product": name,
         "brand": brand.get("name"),
-        "price": None if is_app else raw.get("price"),
-        "app_price": raw.get("price") if is_app else None,
-        "reference_price": raw.get("referencePrice"),
+        "price": raw.get("price"),
+        "app_price": float(app_match.group(1).replace(",", ".")) if app_match else None,
+        "normal_price": raw.get("oldPrice") or None,
         "unit_price": raw.get("referencePrice"),
         "unit": unit.get("shortName"),
-        "pack_size": pack_size,
-        "valid_from": raw.get("validFrom"),
-        "valid_to": raw.get("validTo"),
+        "pack": pack_size,
+        "from": valid_from.isoformat(),
+        "to": valid_to.isoformat(),
         "category": category_for(text),
-        "description": description,
     }
 
 
 def run(output_dir: Path) -> tuple[dict[str, int], list[str]]:
     headers = api_headers()
-    offers: list[dict[str, Any]] = []
+    fields = [
+        "product", "brand", "price", "app_price", "normal_price", "unit_price",
+        "unit", "pack", "from", "to", "category",
+    ]
+    stores: dict[str, dict[str, Any]] = {}
     counts: dict[str, int] = {}
     errors: list[str] = []
     for retailer in RETAILERS:
         try:
             raw = fetch_retailer(retailer, headers)
             cleaned = [offer for item in raw if (offer := normalize(item)) is not None]
-            offers.extend(cleaned)
-            counts[retailer.upper()] = len(cleaned)
+            store = (raw[0].get("retailer") or {}).get("name", retailer.upper()) if raw else retailer.upper()
+            compact = [[offer[field] for field in fields] for offer in cleaned]
+            stores[store] = {"fields": fields, "offers": compact}
+            counts[store] = len(cleaned)
         except Exception as exc:  # Continue so one unavailable retailer does not erase all data.
             errors.append(f"{retailer.upper()}: {type(exc).__name__}: {exc}")
             counts[retailer.upper()] = 0
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    today = dt.datetime.now(dt.timezone.utc).date().isoformat()
-    rendered = json.dumps(offers, ensure_ascii=False, indent=2) + "\n"
+    today = dt.datetime.now(dt.timezone.utc).astimezone(ZoneInfo("Europe/Berlin")).date().isoformat()
+    rendered = json.dumps({"generated": today, "stores": stores}, ensure_ascii=False, separators=(",", ":")) + "\n"
     (output_dir / "latest.json").write_text(rendered, encoding="utf-8")
     (output_dir / f"{today}.json").write_text(rendered, encoding="utf-8")
-    lines = [f"Generated: {dt.datetime.now(dt.timezone.utc).isoformat()}", f"Postcode: {POSTCODE}"]
+    lines = [f"Generated: {today}", f"Postcode: {POSTCODE}"]
     lines.extend(f"{store}: {count}" for store, count in counts.items())
     lines.append("Errors: " + ("; ".join(errors) if errors else "none"))
     (output_dir / "summary.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
